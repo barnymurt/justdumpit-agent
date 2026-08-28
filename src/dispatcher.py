@@ -66,6 +66,8 @@ def process_video_payload(
     max_relevance = max((g.get("relevance", 0) for g in per_goal), default=0)
     report_actions = []
 
+    video_extraction = goals_client.get_extraction(video_id)
+
     for goal_entry in per_goal:
         goal_id = goal_entry.get("goal_id", "")
         relevance = goal_entry.get("relevance", 0)

@@ -65,7 +65,9 @@ def list_watch_later_entries(only_pending: bool = True, limit: int = 50) -> list
 
 def get_stage2(video_id: str, prompt_version: str = "v2") -> Optional[dict]:
     """Fetch a single Stage 2 output. Reads it from the analyses table via
-    justdumpit's DB-backed endpoint."""
+    justdumpit's DB-backed endpoint. Returns the INNER stage2 payload
+    (with `per_goal`, `rejections`, `goals_version`, etc.) — not the
+    endpoint's outer wrapper."""
     try:
         r = httpx.get(
             f"{get_justdumpit_url()}/video/{video_id}/stage2",
@@ -76,9 +78,32 @@ def get_stage2(video_id: str, prompt_version: str = "v2") -> Optional[dict]:
         if r.status_code == 404:
             return None
         r.raise_for_status()
-        return r.json()
+        wrapper = r.json()
+        return wrapper.get("stage2") or wrapper
     except Exception as e:
         log.warning("get_stage2(%s) failed: %s", video_id, e)
+        return None
+
+
+def get_extraction(video_id: str, prompt_version: str = "v2") -> Optional[dict]:
+    """Fetch the stored Stage 1 extraction (atoms, stack, etc.) for a video.
+
+    Returns the inner extraction payload (with `transferable_atoms`, `stack`).
+    """
+    try:
+        r = httpx.get(
+            f"{get_justdumpit_url()}/video/{video_id}/stage2",
+            params={"prompt_version": prompt_version},
+            headers=_headers(),
+            timeout=_TIMEOUT,
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        wrapper = r.json()
+        return wrapper.get("extraction")
+    except Exception as e:
+        log.warning("get_extraction(%s) failed: %s", video_id, e)
         return None
 
 
