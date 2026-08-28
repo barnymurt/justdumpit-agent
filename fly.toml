@@ -1,0 +1,36 @@
+app = "justdumpit-agent"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  POLLER_INTERVAL = "900"
+  POLLER_STARTUP_DELAY = "120"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024
+
+[[mounts]]
+  source = "agent_data"
+  destination = "/data"
+
+[deploy]
+  release_command = "python -c 'from src.auditor import init_db; init_db()'"

@@ -1,0 +1,41 @@
+# Repo → realm map. Drives match conditions used by tier_overrides.
+# Names should match GitHub repo names exactly (case-insensitive).
+# Wildcards (*) supported; `scratch/*` matches any repo starting with scratch/.
+
+version: 1
+owner: barnymurt
+last_reviewed: 2026-08-27
+
+realms:
+  # Operator's live products (changes here go to real users).
+  # tier_override: touches_live_product_owned_by_me
+  live_product_owned_by_me:
+    - justdumpit
+    - justdumpit-ytscraper
+    - mcppay
+    - MCPpay
+    - fit50
+    - IndustraLEAD
+    - TRG
+    - JobHunt
+    - ReportDash
+    - aiconsult
+    - Verdoplay
+
+  # Client / third-party work. Operator is not the sole owner.
+  # tier_override: touches_client_or_third_party_work
+  client_or_third_party_work:
+    - Hazelrigg
+    - hazelrigg-admin
+    - hazelrigg-lead-flow
+
+  # Scratch / experiment repos. Anything goes (tier_0 ok).
+  scratch:
+    - sandbox-*
+    - justdumpit-agent
+    - justdumpit-experiments
+
+  # Repos where the agent may propose but should never auto-execute
+  # (they require explicit approval even at tier_0/1). Currently empty
+  # but the slot exists so future rules can target it.
+  frozen: []

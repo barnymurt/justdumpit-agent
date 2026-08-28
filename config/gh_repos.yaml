@@ -1,0 +1,29 @@
+# GitHub repos the agent operates on.
+# `default_branch` is the base for PRs. `proposal_label` is added to GitHub issues
+# the agent opens as proposals (Phase 2). `disabled: true` excludes a repo.
+
+version: 1
+owner: barnymurt
+last_reviewed: 2026-08-27
+
+repos:
+  - name: justdumpit
+    default_branch: main
+    description: YTTranscriptScraper (the extractor this agent consumes from)
+    proposal_label: agent:proposal
+    disabled: false
+
+  - name: mcppay
+    default_branch: main
+    description: MCP payment product
+    proposal_label: agent:proposal
+    disabled: false
+
+  - name: justdumpit-agent
+    default_branch: main
+    description: This repo
+    proposal_label: agent:proposal
+    disabled: false
+
+  # Other repos the operator owns that the agent might propose into.
+  # Add as needed.
