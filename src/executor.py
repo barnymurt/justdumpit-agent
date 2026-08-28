@@ -145,6 +145,15 @@ def _branch_already_exists(repo: str, branch: str) -> bool:
     return rc == 0 and out.strip().startswith("{")
 
 
+def _full_repo(target_repo: str) -> str:
+    """Return OWNER/REPO if target_repo is bare, else return as-is."""
+    if not target_repo:
+        return target_repo
+    if "/" in target_repo:
+        return target_repo
+    return f"{get_gh_owner()}/{target_repo}"
+
+
 def execute_tier_1(
     action: dict,
     action_id: str,
@@ -160,10 +169,11 @@ def execute_tier_1(
     if not target_repo:
         return {"ok": False, "reason": "no target_repo resolved"}
 
+    full_repo = _full_repo(target_repo)
     branch = f"agent/{action_id[:12]}"
 
     rc, _, branch_err = _run_gh(
-        "api", f"repos/{get_gh_owner()}/{target_repo}/git/refs/heads/{default_branch}",
+        "api", f"repos/{full_repo}/git/refs/heads/{default_branch}",
     )
     if rc != 0:
         return {"ok": False, "reason": f"could not fetch base branch: {branch_err.strip()[:200]}"}
@@ -179,7 +189,7 @@ def execute_tier_1(
 
         rc, _, branch_create_err = _run_gh(
             "api", "--method", "POST",
-            f"repos/{get_gh_owner()}/{target_repo}/git/refs",
+            f"repos/{full_repo}/git/refs",
             "-f", f"ref=refs/heads/{branch}",
             "-f", f"sha={base_sha}",
         )
@@ -194,7 +204,7 @@ def execute_tier_1(
     commit_msg = f"agent: scaffold for {action_id}"
     rc, _, commit_err = _run_gh(
         "api", "--method", "PUT",
-        f"repos/{get_gh_owner()}/{target_repo}/contents/AGENT_SCAFFOLD.md",
+        f"repos/{full_repo}/contents/AGENT_SCAFFOLD.md",
         "-f", f"message={commit_msg}",
         "-f", f"branch={branch}",
         "-f", f"content={content_b64}",
@@ -206,7 +216,7 @@ def execute_tier_1(
     body = _pr_body(action, action.get("video_id", "unknown"), video_url)
     rc, pr_stdout, pr_err = _run_gh(
         "pr", "create",
-        "--repo", target_repo,
+        "--repo", full_repo,
         "--base", default_branch,
         "--head", branch,
         "--title", title,
@@ -329,7 +339,7 @@ def execute_tier_2_or_3(
     Falls back to the configured default_repo if no target_repo is resolvable.
     Returns the issue URL as the artifact.
     """
-    repo = target_repo or default_repo
+    repo = _full_repo(target_repo or default_repo)
     label = "agent:proposal"
     title = f"[agent/proposal] {goal_id}: {action.get('action_description', action_id)[:70]}"
     body = _build_proposal_body(action, video_id, video_url, goal_id, tier)
