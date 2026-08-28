@@ -340,7 +340,6 @@ def execute_tier_2_or_3(
     Returns the issue URL as the artifact.
     """
     repo = _full_repo(target_repo or default_repo)
-    label = "agent:proposal"
     title = f"[agent/proposal] {goal_id}: {action.get('action_description', action_id)[:70]}"
     body = _build_proposal_body(action, video_id, video_url, goal_id, tier)
 
@@ -361,7 +360,6 @@ def execute_tier_2_or_3(
         "--repo", repo,
         "--title", title,
         "--body", body,
-        "--label", label,
     )
     if rc != 0:
         return {"ok": False, "reason": f"gh issue create failed: {err.strip()[:200]}"}
