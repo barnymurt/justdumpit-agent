@@ -260,7 +260,7 @@ def _dispatch(
             video_url=video_url,
         )
         initial_status = "proposal_drafted" if result.get("ok") else "awaiting_greenlight"
-        auditor.record_action(
+        record_kwargs = dict(
             action_id=aid,
             video_id=video_id,
             goal_id=decision.goal_id or "?",
@@ -280,11 +280,21 @@ def _dispatch(
             policy_note=decision.reason or "awaiting operator greenlight via issue comment or /action/<id>/approve",
             target_repo=decision.target_repo,
         )
+        if _action_exists(aid):
+            auditor.update_action_status(
+                aid,
+                initial_status,
+                artifacts=record_kwargs["artifacts"],
+                rejection_reason=record_kwargs["rejection_reason"],
+            )
+            row = auditor.get_action(aid) or {}
+        else:
+            row = auditor.record_action(**record_kwargs)
         return {
             "action_id": aid,
             "status": initial_status,
             "final_tier": decision.final_tier,
-            "issue_url": (result.get("artifact") or {}).get("issue_url") if result.get("ok") else None,
+            "issue_url": (row.get("artifacts") or {}).get("issue_url") if isinstance(row.get("artifacts"), dict) else None,
         }
         return {"action_id": aid, "status": "awaiting_greenlight", "final_tier": decision.final_tier}
 
