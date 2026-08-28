@@ -145,7 +145,7 @@ def evaluate_action(
         return PolicyDecision(
             allowed=False,
             raw_tier=raw_tier,
-            final_tier="tier_4_hard_stop",
+final_tier="tier_4_hard_stop",
             realm=repo_realm(realm_cfg, target_repo) if target_repo else "unknown",
             reason=f"goal_id {goal_id!r} not in current goals.yaml",
             goal_id=goal_id,
@@ -153,28 +153,28 @@ def evaluate_action(
             target_repo=target_repo,
         )
 
-if video_extraction and video_extraction.get("transferable_atoms"):
-            valid_atom_ids = {a.get("id", "") for a in video_extraction["transferable_atoms"]}
-            invalid_atoms = [a for a in atoms_used if a not in valid_atom_ids]
-            if invalid_atoms:
-                return PolicyDecision(
-                    allowed=False,
-                    raw_tier=raw_tier,
-                    final_tier="tier_4_hard_stop",
-                    realm=repo_realm(realm_cfg, target_repo) if target_repo else "unknown",
-                    reason=f"atoms_used contains invalid atom ids: {invalid_atoms}",
-                    goal_id=goal_id,
-                    atom_ids=atoms_used,
-                    target_repo=target_repo,
-                )
+    if video_extraction and video_extraction.get("transferable_atoms"):
+        valid_atom_ids = {a.get("id", "") for a in video_extraction["transferable_atoms"]}
+        invalid_atoms = [a for a in atoms_used if a not in valid_atom_ids]
+        if invalid_atoms:
+            return PolicyDecision(
+                allowed=False,
+                raw_tier=raw_tier,
+                final_tier="tier_4_hard_stop",
+                realm=repo_realm(realm_cfg, target_repo) if target_repo else "unknown",
+                reason=f"atoms_used contains invalid atom ids: {invalid_atoms}",
+                goal_id=goal_id,
+                atom_ids=atoms_used,
+                target_repo=target_repo,
+            )
 
-            for a in atoms_used:
-                atom_obj = next(
-                    (x for x in video_extraction["transferable_atoms"] if x.get("id") == a),
-                    None,
-                )
-                if atom_obj and not parse_timestamp_range(str(atom_obj.get("timestamp", ""))):
-                    log.warning("atom %s has unparseable timestamp: %r", a, atom_obj.get("timestamp"))
+        for a in atoms_used:
+            atom_obj = next(
+                (x for x in video_extraction["transferable_atoms"] if x.get("id") == a),
+                None,
+            )
+            if atom_obj and not parse_timestamp_range(str(atom_obj.get("timestamp", ""))):
+                log.warning("atom %s has unparseable timestamp: %r", a, atom_obj.get("timestamp"))
 
     final_tier = raw_tier
 
