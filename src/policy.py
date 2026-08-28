@@ -55,6 +55,37 @@ def action_id(
     return f"act_{h[:16]}"
 
 
+def parse_timestamp_range(ts: str) -> Optional[tuple[float, float]]:
+    """Parse a 'MM:SS-MM:SS' or 'M:SS' string into (start_seconds, end_seconds).
+    Returns None if the format is unrecognised."""
+    import re
+
+    if not isinstance(ts, str):
+        if isinstance(ts, (int, float)):
+            return float(ts), float(ts)
+        return None
+
+    if "-" in ts and ts.count("-") == 1:
+        start_str, end_str = ts.split("-", 1)
+    else:
+        start_str, end_str = ts, ts
+
+    def _parse_side(s: str) -> Optional[float]:
+        s = s.strip()
+        m = re.match(r"^(\d{1,2}):(\d{2})$", s)
+        if m:
+            return int(m.group(1)) * 60 + int(m.group(2))
+        if s.isdigit():
+            return float(s)
+        return None
+
+    start = _parse_side(start_str)
+    end = _parse_side(end_str)
+    if start is None or end is None:
+        return None
+    return start, end
+
+
 def _infer_target_repo(action_description: str, atoms_used: list[str], dependencies: list[str]) -> Optional[str]:
     """Best-effort: find a repo name mentioned in the action's description / deps.
 
@@ -122,20 +153,28 @@ def evaluate_action(
             target_repo=target_repo,
         )
 
-    if video_extraction and video_extraction.get("transferable_atoms"):
-        valid_atom_ids = {a.get("id", "") for a in video_extraction["transferable_atoms"]}
-        invalid_atoms = [a for a in atoms_used if a not in valid_atom_ids]
-        if invalid_atoms:
-            return PolicyDecision(
-                allowed=False,
-                raw_tier=raw_tier,
-                final_tier="tier_4_hard_stop",
-                realm=repo_realm(realm_cfg, target_repo) if target_repo else "unknown",
-                reason=f"atoms_used contains invalid atom ids: {invalid_atoms}",
-                goal_id=goal_id,
-                atom_ids=atoms_used,
-                target_repo=target_repo,
-            )
+if video_extraction and video_extraction.get("transferable_atoms"):
+            valid_atom_ids = {a.get("id", "") for a in video_extraction["transferable_atoms"]}
+            invalid_atoms = [a for a in atoms_used if a not in valid_atom_ids]
+            if invalid_atoms:
+                return PolicyDecision(
+                    allowed=False,
+                    raw_tier=raw_tier,
+                    final_tier="tier_4_hard_stop",
+                    realm=repo_realm(realm_cfg, target_repo) if target_repo else "unknown",
+                    reason=f"atoms_used contains invalid atom ids: {invalid_atoms}",
+                    goal_id=goal_id,
+                    atom_ids=atoms_used,
+                    target_repo=target_repo,
+                )
+
+            for a in atoms_used:
+                atom_obj = next(
+                    (x for x in video_extraction["transferable_atoms"] if x.get("id") == a),
+                    None,
+                )
+                if atom_obj and not parse_timestamp_range(str(atom_obj.get("timestamp", ""))):
+                    log.warning("atom %s has unparseable timestamp: %r", a, atom_obj.get("timestamp"))
 
     final_tier = raw_tier
 

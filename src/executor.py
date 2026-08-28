@@ -231,3 +231,142 @@ def execute_tier_1(
             "pr_url": pr_url,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Tier 2/3 — GitHub issue proposal
+# ---------------------------------------------------------------------------
+
+
+def _build_proposal_body(action: dict, video_id: str, video_url: str, goal_id: str, tier: str) -> str:
+    """Build the markdown body of a tier_2/3 GitHub issue proposal."""
+    pre_check = action.get("pre_check") or []
+    pre_check_block = ""
+    if pre_check:
+        pre_check_block = "\n## Pre-check (required for tier_3)\n\n"
+        for q in pre_check:
+            pre_check_block += f"- [ ] {q}\n"
+    elif tier == "tier_3_explicit_green_light":
+        pre_check_block = (
+            "\n## Pre-check (required for tier_3)\n\n"
+            "The following questions must be answered before this action executes:\n\n"
+            "- [ ] What is the smallest reversible version of this action?\n"
+            "- [ ] What does it commit the operator to (time, money, brand, contractual)?\n"
+            "- [ ] What is the rollback path if this goes wrong in 30 days?\n"
+            "- [ ] Who or what outside the operator's control does it depend on?\n"
+            "- [ ] What is the demand signal we're acting on?\n"
+        )
+
+    deps = action.get("dependencies") or []
+    deps_block = ""
+    if deps:
+        deps_block = "\n## Dependencies\n\n"
+        for d in deps:
+            deps_block += f"- {d}\n"
+
+    impact = action.get("impact_classification") or "(unset)"
+    tier_emoji = {
+        "tier_2_propose_with_artifact": "Tier 2 (propose with artifact)",
+        "tier_3_explicit_green_light": "Tier 3 (explicit green light required)",
+    }.get(tier, tier)
+
+    return (
+        f"## Proposal\n\n"
+        f"{action.get('action_description', '(no description)')}\n\n"
+        f"## Tier\n\n"
+        f"{tier_emoji}\n\n"
+        f"## Context\n\n"
+        f"- Source video: `{video_id}` ([link]({video_url or 'https://www.youtube.com/'}))\n"
+        f"- Goal: `{goal_id}`\n"
+        f"- Stage 2 relevance: {action.get('stage2_relevance', '?')}/3\n"
+        f"- Effort estimate: {action.get('effort_estimate_hours', '?')}h\n"
+        f"- Reversibility: {action.get('reversibility', '?')}\n"
+        f"- External surface: {action.get('external_surface', '?')}\n"
+        f"- Impact classification: {impact}\n"
+        f"- Atoms used: {', '.join(action.get('atoms_used', []) or []) or '(none)'}\n"
+        f"{deps_block}"
+        f"{pre_check_block}\n"
+        "## Status\n\n"
+        "- [ ] Approve — comment `/approve` (or `go`)\n"
+        "- [ ] Reject — comment `/reject` (or `nope`)\n"
+        "- [ ] Request changes — comment with `changes: <notes>`\n\n"
+        "---\n"
+        "Drafted by `justdumpit-agent` from Stage 2 output of "
+        f"[{video_id}]({video_url}). Operator must explicitly approve before execution.\n"
+    )
+
+
+def _issue_already_open(repo: str, title_needle: str) -> Optional[str]:
+    """Return the URL of an open issue whose title contains `title_needle`, or None."""
+    rc, out, _ = _run_gh("issue", "list", "--repo", repo, "--state", "open",
+                         "--json", "url,title", "--limit", "20")
+    if rc != 0:
+        return None
+    try:
+        items = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    needle = title_needle.lower()
+    for it in items:
+        if needle in (it.get("title") or "").lower():
+            return it.get("url")
+    return None
+
+
+def execute_tier_2_or_3(
+    action: dict,
+    action_id: str,
+    target_repo: Optional[str],
+    *,
+    goal_id: str,
+    tier: str,
+    video_id: str,
+    video_url: str = "",
+    default_repo: str = "justdumpit-agent",
+) -> dict:
+    """Open a GitHub issue as the proposal for a tier_2/3 action.
+
+    Falls back to the configured default_repo if no target_repo is resolvable.
+    Returns the issue URL as the artifact.
+    """
+    repo = target_repo or default_repo
+    label = "agent:proposal"
+    title = f"[agent/proposal] {goal_id}: {action.get('action_description', action_id)[:70]}"
+    body = _build_proposal_body(action, video_id, video_url, goal_id, tier)
+
+    existing = _issue_already_open(repo, title[:50])
+    if existing:
+        return {
+            "ok": True,
+            "artifact": {
+                "type": "issue_proposal",
+                "repo": repo,
+                "issue_url": existing,
+                "note": "reused existing issue (idempotent)",
+            },
+        }
+
+    rc, out, err = _run_gh(
+        "issue", "create",
+        "--repo", repo,
+        "--title", title,
+        "--body", body,
+        "--label", label,
+    )
+    if rc != 0:
+        return {"ok": False, "reason": f"gh issue create failed: {err.strip()[:200]}"}
+
+    issue_url = ""
+    for line in out.splitlines():
+        if line.startswith("https://"):
+            issue_url = line.strip()
+            break
+
+    return {
+        "ok": True,
+        "artifact": {
+            "type": "issue_proposal",
+            "repo": repo,
+            "issue_url": issue_url,
+        },
+    }

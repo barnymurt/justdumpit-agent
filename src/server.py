@@ -118,6 +118,62 @@ def get_action(action_id: str) -> dict:
     return row
 
 
+@app.get("/action/{action_id}/transcript-context")
+def get_action_transcript_context(action_id: str):
+    """Fetch the transcript ranges for all atoms_used in this action.
+
+    Resolves atom timestamp strings ("MM:SS-MM:SS") to seconds, calls
+    justdumpit's /video/{id}/transcript/range per atom, and returns
+    the concatenated segments so an operator (or downstream agent)
+    can drill into the source wording.
+    """
+    from src import goals_client
+    from src.policy import parse_timestamp_range
+
+    row = auditor.get_action(action_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="action not found")
+
+    atom_ids = row.get("atom_ids") or []
+    if not isinstance(atom_ids, list):
+        atom_ids = []
+    video_id = row.get("video_id")
+
+    extraction_resp = goals_client.get_extraction(video_id)
+    atoms = (extraction_resp or {}).get("transferable_atoms", []) or []
+    atom_by_id = {a.get("id"): a for a in atoms if a.get("id")}
+
+    contexts = []
+    for aid in atom_ids:
+        atom = atom_by_id.get(aid)
+        if not atom:
+            contexts.append({"atom_id": aid, "found": False})
+            continue
+        ts = atom.get("timestamp") or ""
+        parsed = parse_timestamp_range(str(ts))
+        if not parsed:
+            contexts.append({"atom_id": aid, "found": True, "transcript": None,
+                             "reason": f"unparseable timestamp: {ts!r}"})
+            continue
+        start, end = parsed
+        segs = goals_client.get_transcript_range(video_id, start, end) or {}
+        contexts.append({
+            "atom_id": aid,
+            "found": True,
+            "timestamp": ts,
+            "start": start,
+            "end": end,
+            "segments": segs.get("segments", []),
+            "transcript_video_url": f"https://www.youtube.com/watch?v={video_id}&t={int(start)}s",
+        })
+
+    return {
+        "action_id": action_id,
+        "video_id": video_id,
+        "atoms": contexts,
+    }
+
+
 class DecisionRequest(BaseModel):
     note: Optional[str] = None
 

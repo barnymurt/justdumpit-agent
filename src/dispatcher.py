@@ -250,6 +250,16 @@ def _dispatch(
         return {"action_id": aid, "status": "executed_failed", "reason": result.get("reason")}
 
     if decision.final_tier in ("tier_2_propose_with_artifact", "tier_3_explicit_green_light"):
+        result = executor.execute_tier_2_or_3(
+            action,
+            aid,
+            target_repo=decision.target_repo,
+            goal_id=decision.goal_id or "?",
+            tier=decision.final_tier,
+            video_id=video_id,
+            video_url=video_url,
+        )
+        initial_status = "proposal_drafted" if result.get("ok") else "awaiting_greenlight"
         auditor.record_action(
             action_id=aid,
             video_id=video_id,
@@ -258,18 +268,24 @@ def _dispatch(
             stage2_relevance=int(action.get("stage2_relevance", 0)),
             raw_tier=decision.raw_tier,
             final_tier=decision.final_tier,
-            status="awaiting_greenlight",
+            status=initial_status,
             realm=decision.realm,
             action_description=action.get("action_description", ""),
             effort_hours=int(action.get("effort_estimate_hours", 0) or 0),
             reversibility=action.get("reversibility", "undo_able"),
             external_surface=bool(action.get("external_surface", False)),
             dependencies=list(action.get("dependencies", []) or []),
-            artifacts=None,
-            rejection_reason=None,
-            policy_note=decision.reason or "awaiting operator greenlight via /action/<id>/approve",
+            artifacts=result.get("artifact") if result.get("ok") else None,
+            rejection_reason=None if result.get("ok") else result.get("reason"),
+            policy_note=decision.reason or "awaiting operator greenlight via issue comment or /action/<id>/approve",
             target_repo=decision.target_repo,
         )
+        return {
+            "action_id": aid,
+            "status": initial_status,
+            "final_tier": decision.final_tier,
+            "issue_url": (result.get("artifact") or {}).get("issue_url") if result.get("ok") else None,
+        }
         return {"action_id": aid, "status": "awaiting_greenlight", "final_tier": decision.final_tier}
 
     auditor.record_action(
