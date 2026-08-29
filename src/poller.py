@@ -1,7 +1,13 @@
-"""Cron fallback: poll justdumpit for new Stage 2 outputs and process them.
+"""Polling workers.
 
-Runs as a daemon thread inside the FastAPI process. Disabled by setting
-POLLER_ENABLED=false. Default interval 15 minutes.
+Two background threads:
+1. Stage 2 poller (every POLLER_INTERVAL seconds): polls justdumpit for
+   recent Stage 2 outputs and processes them.
+2. Email reply poller (every EMAIL_POLL_INTERVAL seconds): polls Gmail
+   for replies to action proposal emails and applies operator decisions.
+
+Both are daemon threads inside the FastAPI process. Disable with
+POLLER_ENABLED=false or EMAIL_POLL_ENABLED=false.
 """
 
 from __future__ import annotations
@@ -23,8 +29,13 @@ _ENABLED = os.getenv("POLLER_ENABLED", "true").lower() in ("1", "true", "yes")
 _INTERVAL = int(os.getenv("POLLER_INTERVAL", "900"))
 _STARTUP_DELAY = int(os.getenv("POLLER_STARTUP_DELAY", "60"))
 
+_EMAIL_POLL_ENABLED = os.getenv("EMAIL_POLL_ENABLED", "true").lower() in ("1", "true", "yes")
+_EMAIL_POLL_INTERVAL = int(os.getenv("EMAIL_POLL_INTERVAL", "60"))
+_EMAIL_LOOKBACK_MINUTES = int(os.getenv("EMAIL_LOOKBACK_MINUTES", "15"))
+
 
 _thread: Optional[threading.Thread] = None
+_email_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 
 
@@ -40,23 +51,51 @@ def should_start() -> bool:
     return _ENABLED
 
 
+def email_poll_interval_seconds() -> int:
+    return _EMAIL_POLL_INTERVAL
+
+
 def start_background() -> None:
-    global _thread
+    global _thread, _email_thread
     if not _ENABLED:
         log.info("poller disabled via POLLER_ENABLED")
-        return
-    if is_running():
         return
     _stop_event.clear()
     _thread = threading.Thread(target=_loop, name="agent-poller", daemon=True)
     _thread.start()
     log.info("poller started (interval=%ds, startup_delay=%ds)", _INTERVAL, _STARTUP_DELAY)
+    if _EMAIL_POLL_ENABLED:
+        _email_thread = threading.Thread(
+            target=email_poll_loop,
+            name="agent-email-poller",
+            daemon=True,
+        )
+        _email_thread.start()
+        log.info(
+            "email poller started (interval=%ds, lookback=%dmin)",
+            _EMAIL_POLL_INTERVAL, _EMAIL_LOOKBACK_MINUTES,
+        )
 
 
 def stop_background() -> None:
     _stop_event.set()
     if _thread is not None:
         _thread.join(timeout=5)
+    if _email_thread is not None:
+        _email_thread.join(timeout=5)
+
+
+def email_poll_loop() -> None:
+    from src.channels import email_reply
+    while not _stop_event.is_set():
+        try:
+            report = email_reply.poll_once(since_minutes=_EMAIL_LOOKBACK_MINUTES)
+            if report.get("applied", 0) > 0:
+                log.info("email poller applied %d decisions", report["applied"])
+        except Exception as e:
+            log.exception("email poll iteration failed: %s", e)
+        if _stop_event.wait(timeout=_EMAIL_POLL_INTERVAL):
+            return
 
 
 def run_once(limit: int = 20) -> dict:
@@ -85,6 +124,11 @@ def run_once(limit: int = 20) -> dict:
         reports.append({"video_id": vid, "report": report})
 
     return {"scanned": len(entries), "processed": len(reports), "videos": reports}
+
+
+def email_poll_once() -> dict:
+    from src.channels import email_reply
+    return email_reply.poll_once(since_minutes=_EMAIL_LOOKBACK_MINUTES)
 
 
 def _loop() -> None:

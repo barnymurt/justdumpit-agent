@@ -46,3 +46,20 @@ def get_gh_owner() -> str:
 def get_db_path() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR / "agent_audit.db"
+
+
+def get_telegram_bot_token() -> str:
+    return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+
+
+def get_justdumpit_api_token_for_internal() -> str:
+    """Shared secret the agent uses to authenticate calls TO justdumpit."""
+    return os.getenv("JUSTDUMPIT_API_TOKEN", "").strip()
+
+
+def get_email_poll_interval() -> int:
+    return int(os.getenv("EMAIL_POLL_INTERVAL", "60"))
+
+
+def get_email_poll_enabled() -> bool:
+    return os.getenv("EMAIL_POLL_ENABLED", "true").lower() in ("1", "true", "yes")

@@ -282,3 +282,63 @@ def execute_action(action_id: str) -> dict:
 def cron_run(limit: int = 20) -> dict:
     report = poller.run_once(limit=limit)
     return report
+
+
+@app.post("/internal/email-poll")
+def email_poll_endpoint() -> dict:
+    """Trigger one pass of the email reply poller. Manual trigger for testing."""
+    return poller.email_poll_once()
+
+
+@app.post("/telegram/webhook")
+def telegram_webhook_endpoint(update: dict) -> dict:
+    """Receive Telegram updates (messages + callback queries)."""
+    result = tg.handle_update(update)
+    return {"ok": True, "handled": result}
+
+
+@app.post("/telegram/setup-webhook")
+def telegram_setup_webhook_endpoint(webhook_url: Optional[str] = None) -> dict:
+    """Register the bot's webhook with Telegram.
+
+    If `webhook_url` is omitted, builds it from request headers
+    (`https://<host>/telegram/webhook`).
+    """
+    from fastapi import Request
+    return {"result": "use /telegram/setup-webhook?webhook_url=... or POST with body"}
+
+
+@app.post("/telegram/register-webhook")
+def telegram_register_webhook(request: Request) -> dict:
+    """Register the bot's webhook with Telegram using this server's URL."""
+    host = request.headers.get("host", "")
+    if not host:
+        return {"ok": False, "error": "no host header"}
+    url = f"https://{host}/telegram/webhook"
+    return {"ok": True, "webhook_url": url, "set_result": tg.set_webhook(url)}
+
+
+@app.post("/telegram/send-proposals/{video_id}")
+def telegram_send_proposals(video_id: str) -> dict:
+    """Re-send all awaiting_greenlight actions for a video to the operator via Telegram."""
+    chat_id = tg.get_operator_chat_id()
+    if not chat_id:
+        return {"ok": False, "error": "no operator chat_id; send /start to the bot first"}
+
+    actions = auditor.list_actions(video_id=video_id, status="awaiting_greenlight")
+    if not actions:
+        return {"ok": False, "error": f"no awaiting_greenlight actions for {video_id}"}
+
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    responses = tg.send_proposals_batch(chat_id, actions, video_url=video_url)
+    return {"ok": True, "chat_id": chat_id, "sent": len(responses), "responses": responses}
+
+
+@app.post("/telegram/test")
+def telegram_test_endpoint(message: str = "Test from justdumpit-agent") -> dict:
+    """Send a test message to the registered operator chat."""
+    chat_id = tg.get_operator_chat_id()
+    if not chat_id:
+        return {"ok": False, "error": "no operator chat_id; send /start to the bot first"}
+    resp = tg.send_message(chat_id, message)
+    return {"ok": True, "chat_id": chat_id, "response": resp}
