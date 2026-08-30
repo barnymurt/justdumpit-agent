@@ -22,7 +22,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src import auditor, dispatcher, poller
+from src import auditor, dispatcher, goals_client, poller
 from src.agent_config import load_gh_repos, load_realm
 from src.channels import telegram as tg
 
