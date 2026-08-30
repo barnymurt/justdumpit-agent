@@ -198,6 +198,189 @@ def send_proposals_batch(chat_id: int, actions: list[dict],
     return responses
 
 
+
+
+def _chat_help(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "<b>justdumpit-agent commands</b>\n\n"
+        "<b>/start</b> — register this chat as the operator\n"
+        "<b>/list</b> — show pending proposals\n"
+        "<b>/show act_xxx</b> — show details of one action\n"
+        "<b>/status</b> — show agent health\n"
+        "<b>/approve act_xxx</b> — approve a pending proposal\n"
+        "<b>/reject act_xxx</b> — reject a pending proposal\n"
+        "<b>/changes act_xxx: notes</b> — request changes\n\n"
+        "Or just chat with me — describe what you want and I'll do my best. "
+        "Examples:\n"
+        "• <i>what's awaiting?</i>\n"
+        "• <i>show me the mcppay proposal</i>\n"
+        "• <i>approve the last one</i>\n"
+        "• <i>are there any tier 4 halts?</i>",
+    )
+
+
+def _chat_list(chat_id: int) -> None:
+    from src import auditor
+    actions = auditor.list_actions(status="awaiting_greenlight", limit=20)
+    if not actions:
+        send_message(chat_id, "No actions awaiting greenlight. Use <b>/status</b> for full picture.")
+        return
+    lines = [f"<b>{len(actions)} pending proposal{'s' if len(actions) != 1 else ''}:</b>"]
+    for a in actions[:10]:
+        lines.append(
+            f"\n<b>{a['action_id']}</b> · <i>{a['goal_id']}</i> · tier {a['final_tier']}\n"
+            f"  {a['action_description'][:200]}"
+        )
+    if len(actions) > 10:
+        lines.append(f"\n... and {len(actions) - 10} more")
+    send_message(chat_id, "\n".join(lines))
+
+
+def _chat_show(chat_id: int, action_id: str) -> None:
+    from src import auditor
+    a = auditor.get_action(action_id)
+    if not a:
+        send_message(chat_id, f"Action <b>{action_id}</b> not found.")
+        return
+    arts = a.get("artifacts") or {}
+    issue = ""
+    if isinstance(arts, dict):
+        issue = arts.get("issue_url", "")
+    body = (
+        f"<b>{action_id}</b> · <i>{a['goal_id']}</i> · tier {a['final_tier']} · status {a['status']}\n\n"
+        f"{a['action_description']}\n\n"
+        f"Atoms: {', '.join(a.get('atom_ids') or [])}\n"
+        f"Realm: {a.get('realm')} · Reversibility: {a.get('reversibility')} · Effort: {a.get('effort_hours')}h\n"
+        f"Created: {a.get('created_at')}"
+    )
+    if issue:
+        body += f"\n\nGitHub issue: {issue}"
+    if a.get("rejection_reason"):
+        body += f"\n\nRejection: {a['rejection_reason']}"
+    send_message(chat_id, body)
+
+
+def _chat_status(chat_id: int) -> None:
+    from src import auditor
+    from src.poller import email_poll_interval_seconds, is_running
+    from src.channels import telegram as tg
+    stats = auditor.stats()
+    lines = [
+        "<b>justdumpit-agent status</b>\n",
+        f"Operator chat_id: <code>{tg.get_operator_chat_id()}</code>",
+        f"Poller running: {is_running()}",
+        f"Email poll interval: {email_poll_interval_seconds()}s",
+        "<b>Actions by status:</b>",
+    ]
+    for status, n in sorted(stats.items()):
+        lines.append(f"  · {status}: {n}")
+    send_message(chat_id, "\n".join(lines))
+
+
+def _chat_approve_last(chat_id: int, decision: str = "approve") -> None:
+    from src import auditor
+    actions = auditor.list_actions(status="awaiting_greenlight", limit=1)
+    if not actions:
+        send_message(chat_id, "Nothing awaiting greenlight.")
+        return
+    aid = actions[0]["action_id"]
+    auditor.update_action_status(aid, "approved" if decision == "approve" else "rejected")
+    verb = "approved" if decision == "approve" else "rejected"
+    send_message(chat_id, f"{verb.capitalize()} <b>{aid}</b> (most recent pending action)")
+
+
+def _freeform_chat(chat_id: int, text: str) -> None:
+    """Handle freeform chat. Uses simple keyword routing first, then a brief LLM response."""
+    t = text.lower().strip()
+
+    if any(k in t for k in ["what's awaiting", "whats awaiting", "what is awaiting", "what's pending", "queue"]):
+        _chat_list(chat_id)
+        return
+    if any(k in t for k in ["status", "how's it going", "hows it going", "health"]):
+        _chat_status(chat_id)
+        return
+    if t in ("help", "?", "/help"):
+        _chat_help(chat_id)
+        return
+    if t in ("yes", "y", "approve", "do it", "ship it"):
+        _chat_approve_last(chat_id, "approve")
+        return
+    if t in ("no", "n", "reject", "no thanks"):
+        _chat_approve_last(chat_id, "reject")
+        return
+
+    # LLM fallback for richer questions
+    try:
+        answer = _llm_chat(text)
+    except Exception as e:
+        log.warning("LLM chat failed: %s", e)
+        answer = None
+    if answer:
+        send_message(chat_id, answer)
+    else:
+        send_message(
+            chat_id,
+            "I'm not sure what you meant. Try <b>/help</b> for commands, "
+            "or describe what you want me to do (approve / reject / show / list).",
+        )
+
+
+def _llm_chat(user_text: str):
+    """Use the agent's LLM to answer an open question. Bounded by token cost."""
+    import json as _json
+    from src import auditor
+    from src.config import get_api_key
+
+    actions = auditor.list_actions(limit=10)
+    queue_summary = "\n".join(
+        f"- {a['action_id']} ({a['goal_id']}, tier {a['final_tier']}): {a['action_description'][:120]}"
+        for a in actions
+    ) or "(no recent actions)"
+
+    system = (
+        "You are justdumpit-agent, a goal-aligned action agent. The operator just sent you a message. "
+        "Answer concisely in plain text (no markdown). If they're asking about actions, "
+        "use the queue summary below. If they want to do something, tell them the right command.\n\n"
+        f"Recent actions:\n{queue_summary}"
+    )
+    try:
+        api_key = get_api_key()
+    except Exception:
+        return None
+
+    try:
+        r = httpx.post(
+            "https://api.minimaxi.chat/v1/text/chatcompletion_v2",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "MiniMax-M2.5",
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_text},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 400,
+            },
+            timeout=15.0,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return content.strip()[:2000] if content else None
+    except Exception as e:
+        log.warning("LLM chat request failed: %s", e)
+    return None
+
+
+def _answer_callback_query_if_present(cb, text=None):
+    """Helper: answer a callback_query if we have one."""
+    if cb and cb.get("id"):
+        answer_callback_query(cb["id"], text=text or "")
+
+
+
+
 def handle_update(update: dict) -> Optional[dict]:
     """Handle one Telegram Update (message or callback_query). Returns what we did."""
     token = get_telegram_bot_token()
@@ -211,18 +394,46 @@ def handle_update(update: dict) -> Optional[dict]:
         if not chat_id:
             return None
 
+        operator_chat = get_operator_chat_id()
         if text.startswith("/start") or text == "/start@yourbot":
             set_operator_chat_id(chat_id)
             send_message(
                 chat_id,
-                "Welcome to justdumpit-agent. You'll receive action proposals here. "
-                "Tap Approve / Reject / Changes on each one, or reply with "
-                "/approve act_xxx, /reject act_xxx, /changes act_xxx: notes.",
+                "Welcome to justdumpit-agent. I'll send action proposals here. "
+                "Tap Approve / Reject / Changes on each, or use /approve act_xxx / "
+                "/reject act_xxx / /changes act_xxx: notes.\n\nSend /help for the full "
+                "command list, or just chat with me about what you want.",
             )
             return {"registered_chat_id": chat_id}
 
+        if chat_id != operator_chat:
+            cb = update.get("callback_query")
+            if cb:
+                answer_callback_query(
+                    cb.get("id", ""),
+                    text="This bot is configured for a single operator. /start on your own instance to claim it.",
+                )
+            return {"unauthorized_chat": chat_id}
+
+        if text in ("/help", "help", "?"):
+            _chat_help(chat_id)
+            return {"handled": "help"}
+
+        if text.startswith("/list") or text in ("queue", "pending"):
+            _chat_list(chat_id)
+            return {"handled": "list"}
+
+        if text.startswith("/status") or text == "status":
+            _chat_status(chat_id)
+            return {"handled": "status"}
+
+        m = re.match(r"^/show\s+(act_\w+)$", text)
+        if m:
+            _chat_show(chat_id, m.group(1))
+            return {"handled": "show"}
+
         m = re.match(r"^/(approve|reject|changes)\s+(\S+)(?:\s+(.*))?$", text, re.DOTALL)
-        if m and chat_id == get_operator_chat_id():
+        if m:
             verb, target_aid, note = m.group(1), m.group(2), m.group(3)
             if target_aid.startswith("act_"):
                 result = apply_decision(target_aid, verb, note=note)
@@ -230,9 +441,11 @@ def handle_update(update: dict) -> Optional[dict]:
                                     + (f"\nNote: {note}" if note else ""))
                 return result
             send_message(chat_id, f"Unknown action id: {target_aid}")
-            return None
+            return {"unknown_action": target_aid}
 
-        return {"received_message": text}
+        # Freeform chat fallback
+        _freeform_chat(chat_id, text)
+        return {"handled": "chat", "text": text}
 
     if "callback_query" in update:
         cb = update["callback_query"]
