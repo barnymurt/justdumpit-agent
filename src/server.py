@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from src import auditor, dispatcher, poller
 from src.agent_config import load_gh_repos, load_realm
+from src.channels import telegram as tg
 
 
 log = logging.getLogger("justdumpit_agent.server")
