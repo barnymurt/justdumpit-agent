@@ -290,6 +290,100 @@ def _chat_approve_last(chat_id: int, decision: str = "approve") -> None:
     send_message(chat_id, f"{verb.capitalize()} <b>{aid}</b> (most recent pending action)")
 
 
+def _extract_youtube_url(text: str):
+    """Return the first YouTube URL found in the text, or None."""
+    m = re.search(
+        rb"(https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]*v=|youtu\.be/|m\.youtube\.com/watch\?[^\s]*v=)[A-Za-z0-9_-]{6,}[^\s]*)",
+        text.encode("utf-8"),
+    )
+    return m.group(1).decode("utf-8") if m else None
+
+
+def _send_safe(chat_id: int, html: str, token=None):
+    """Send HTML to Telegram with safe character escaping.
+
+    Telegram's parse_mode=HTML rejects text with raw `&`, `<`, `>` in user content.
+    We escape those, then re-enable our intentional tags.
+    """
+    safe = (
+        html
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    for tag in ("b", "i", "code", "pre"):
+        safe = safe.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+    safe = safe.replace("&lt;br&gt;", "<br>")
+    return send_message(chat_id, safe, token=token)
+
+
+def _analyse_url(chat_id: int, url: str) -> None:
+    """Forward a YouTube URL to justdumpit-ytscraper for full analysis.
+
+    Streams progress: 'Analyzing...' -> summary -> Stage 2 brief -> usage hint.
+    """
+    from src.config import get_justdumpit_api_token_for_internal, get_justdumpit_url
+
+    _send_safe(chat_id, f"Analyzing <code>{_html_escape(url)}</code>... this can take 30-90 seconds.")
+    token = get_justdumpit_api_token_for_internal()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        r = httpx.post(
+            f"{get_justdumpit_url()}/analyse",
+            headers=headers,
+            json={"url": url, "prompt_version": "v2", "send_email": False},
+            timeout=180.0,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        log.warning("analyse_url %s failed: %s", url, e)
+        _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code>")
+        return
+
+    title = data.get("video_title") or "(no title)"
+    video_id = data.get("video_id") or ""
+    atoms_count = len(data.get("atoms") or [])
+    stack_count = len(data.get("stack") or [])
+    thesis = (data.get("thesis") or "")[:300]
+
+    lines = [
+        f"<b>{_html_escape(title)}</b>",
+        f"<code>{_html_escape(video_id)}</code>",
+        f"Atoms: {atoms_count} \u00b7 Stack: {stack_count}",
+    ]
+    if thesis:
+        lines.append(f"<i>{_html_escape(thesis)}</i>")
+    _send_safe(chat_id, "\n\n".join(lines))
+
+    s2 = data.get("stage2") or {}
+    for goal in s2.get("per_goal", []) or []:
+        relevance = goal.get("relevance", 0)
+        skip = goal.get("skip_reason") or ""
+        actions = goal.get("proposed_actions", []) or []
+        goal_id = _html_escape(goal.get("goal_id", "?"))
+        if relevance < 2 and not actions:
+            line = f"<b>{goal_id}</b>: skipped (relevance {relevance})" + (
+                f" \u2014 {_html_escape(skip[:120])}" if skip else ""
+            )
+        elif actions:
+            line = f"<b>{goal_id}</b>: relevance {relevance}/3 \u00b7 {len(actions)} proposed action(s)"
+        else:
+            line = f"<b>{goal_id}</b>: relevance {relevance}/3"
+        _send_safe(chat_id, line)
+
+    _send_safe(
+        chat_id,
+        "Use <code>/show act_xxx</code> for details, or <code>/approve act_xxx</code> / <code>/reject act_xxx</code> to decide.",
+    )
+
+
+
+
+
 def _freeform_chat(chat_id: int, text: str) -> None:
     """Handle freeform chat. Uses simple keyword routing first, then a brief LLM response."""
     t = text.lower().strip()
