@@ -313,7 +313,7 @@ def _send_safe(chat_id: int, html: str, token=None):
     for tag in ("b", "i", "code", "pre"):
         safe = safe.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
     safe = safe.replace("&lt;br&gt;", "<br>")
-    return _send_safe(chat_id, safe, token=token)
+    return send_message(chat_id, safe, token=token)
 
 
 def _analyse_url(chat_id: int, url: str) -> None:
