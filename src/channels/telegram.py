@@ -201,8 +201,7 @@ def send_proposals_batch(chat_id: int, actions: list[dict],
 
 
 def _chat_help(chat_id: int) -> None:
-    send_message(
-        chat_id,
+    _send_safe(chat_id,
         "<b>justdumpit-agent commands</b>\n\n"
         "<b>/start</b> — register this chat as the operator\n"
         "<b>/list</b> — show pending proposals\n"
@@ -224,7 +223,7 @@ def _chat_list(chat_id: int) -> None:
     from src import auditor
     actions = auditor.list_actions(status="awaiting_greenlight", limit=20)
     if not actions:
-        send_message(chat_id, "No actions awaiting greenlight. Use <b>/status</b> for full picture.")
+        _send_safe(chat_id, "No actions awaiting greenlight. Use <b>/status</b> for full picture.")
         return
     lines = [f"<b>{len(actions)} pending proposal{'s' if len(actions) != 1 else ''}:</b>"]
     for a in actions[:10]:
@@ -234,14 +233,14 @@ def _chat_list(chat_id: int) -> None:
         )
     if len(actions) > 10:
         lines.append(f"\n... and {len(actions) - 10} more")
-    send_message(chat_id, "\n".join(lines))
+    _send_safe(chat_id, "\n".join(lines))
 
 
 def _chat_show(chat_id: int, action_id: str) -> None:
     from src import auditor
     a = auditor.get_action(action_id)
     if not a:
-        send_message(chat_id, f"Action <b>{action_id}</b> not found.")
+        _send_safe(chat_id, f"Action <b>{action_id}</b> not found.")
         return
     arts = a.get("artifacts") or {}
     issue = ""
@@ -258,7 +257,7 @@ def _chat_show(chat_id: int, action_id: str) -> None:
         body += f"\n\nGitHub issue: {issue}"
     if a.get("rejection_reason"):
         body += f"\n\nRejection: {a['rejection_reason']}"
-    send_message(chat_id, body)
+    _send_safe(chat_id, body)
 
 
 def _chat_status(chat_id: int) -> None:
@@ -275,19 +274,19 @@ def _chat_status(chat_id: int) -> None:
     ]
     for status, n in sorted(stats.items()):
         lines.append(f"  · {status}: {n}")
-    send_message(chat_id, "\n".join(lines))
+    _send_safe(chat_id, "\n".join(lines))
 
 
 def _chat_approve_last(chat_id: int, decision: str = "approve") -> None:
     from src import auditor
     actions = auditor.list_actions(status="awaiting_greenlight", limit=1)
     if not actions:
-        send_message(chat_id, "Nothing awaiting greenlight.")
+        _send_safe(chat_id, "Nothing awaiting greenlight.")
         return
     aid = actions[0]["action_id"]
     auditor.update_action_status(aid, "approved" if decision == "approve" else "rejected")
     verb = "approved" if decision == "approve" else "rejected"
-    send_message(chat_id, f"{verb.capitalize()} <b>{aid}</b> (most recent pending action)")
+    _send_safe(chat_id, f"{verb.capitalize()} <b>{aid}</b> (most recent pending action)")
 
 
 def _extract_youtube_url(text: str):
@@ -314,7 +313,7 @@ def _send_safe(chat_id: int, html: str, token=None):
     for tag in ("b", "i", "code", "pre"):
         safe = safe.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
     safe = safe.replace("&lt;br&gt;", "<br>")
-    return send_message(chat_id, safe, token=token)
+    return _send_safe(chat_id, safe, token=token)
 
 
 def _analyse_url(chat_id: int, url: str) -> None:
@@ -411,10 +410,9 @@ def _freeform_chat(chat_id: int, text: str) -> None:
         log.warning("LLM chat failed: %s", e)
         answer = None
     if answer:
-        send_message(chat_id, answer)
+        _send_safe(chat_id, answer)
     else:
-        send_message(
-            chat_id,
+        _send_safe(chat_id,
             "I'm not sure what you meant. Try <b>/help</b> for commands, "
             "or describe what you want me to do (approve / reject / show / list).",
         )
@@ -491,8 +489,7 @@ def handle_update(update: dict) -> Optional[dict]:
         operator_chat = get_operator_chat_id()
         if text.startswith("/start") or text == "/start@yourbot":
             set_operator_chat_id(chat_id)
-            send_message(
-                chat_id,
+            _send_safe(chat_id,
                 "Welcome to justdumpit-agent. I'll send action proposals here. "
                 "Tap Approve / Reject / Changes on each, or use /approve act_xxx / "
                 "/reject act_xxx / /changes act_xxx: notes.\n\nSend /help for the full "
@@ -531,10 +528,10 @@ def handle_update(update: dict) -> Optional[dict]:
             verb, target_aid, note = m.group(1), m.group(2), m.group(3)
             if target_aid.startswith("act_"):
                 result = apply_decision(target_aid, verb, note=note)
-                send_message(chat_id, f"Decision recorded: <b>{verb}</b> {target_aid}"
+                _send_safe(chat_id, f"Decision recorded: <b>{verb}</b> {target_aid}"
                                     + (f"\nNote: {note}" if note else ""))
                 return result
-            send_message(chat_id, f"Unknown action id: {target_aid}")
+            _send_safe(chat_id, f"Unknown action id: {target_aid}")
             return {"unknown_action": target_aid}
 
         # Freeform chat fallback
@@ -564,8 +561,7 @@ def handle_update(update: dict) -> Optional[dict]:
                 callback_id,
                 text=f"Decision recorded: {verb} {target_aid}",
             )
-            send_message(
-                chat_id,
+            _send_safe(chat_id,
                 f"<b>{verb}</b> applied to {target_aid}.",
             )
             return {"applied": verb, "action_id": target_aid}
