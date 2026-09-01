@@ -90,6 +90,19 @@ def internal_event(evt: InternalEvent) -> dict:
         realm_cfg=REALM_CFG,
         gh_cfg=GH_CFG,
     )
+
+    if report.get("actions"):
+        try:
+            operator_chat = tg.get_operator_chat_id()
+            if operator_chat:
+                tg.send_proposals_batch(
+                    chat_id=operator_chat,
+                    actions=report["actions"],
+                    video_url=evt.video_url or f"https://www.youtube.com/watch?v={evt.video_id}",
+                )
+        except Exception as e:
+            log.warning("telegram push for %s failed: %s", evt.video_id, e)
+
     return report
 
 
