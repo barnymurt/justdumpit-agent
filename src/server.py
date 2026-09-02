@@ -320,6 +320,12 @@ def debug_recent_telegram():
     return {"count": len(_LAST_WEBHOOKS), "updates": _LAST_WEBHOOKS}
 
 
+@app.post("/debug/clear")
+def debug_clear():
+    _LAST_WEBHOOKS.clear()
+    return {"ok": True, "cleared": True}
+
+
 @app.post("/telegram/setup-webhook")
 def telegram_setup_webhook_endpoint(webhook_url: Optional[str] = None) -> dict:
     """Register the bot's webhook with Telegram.
