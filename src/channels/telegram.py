@@ -336,12 +336,13 @@ def _analyse_url(chat_id: int, url: str) -> None:
             json={"url": url, "prompt_version": "v2", "send_email": False},
             timeout=180.0,
         )
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except Exception as e:
+            log.warning("analyse_url %s failed: %s | response body: %s", url, e, r.text[:500] if hasattr(r, "text") else "<no body>")
+            _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code><br><pre>{_html_escape((r.text[:500] if hasattr(r, 'text') else '<no body>'))}</pre>")
+            return
         data = r.json()
-    except Exception as e:
-        log.warning("analyse_url %s failed: %s", url, e)
-        _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code>")
-        return
 
     title = data.get("video_title") or "(no title)"
     video_id = data.get("video_id") or ""
