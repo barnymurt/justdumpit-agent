@@ -35,6 +35,7 @@ app = FastAPI(title="justdumpit-agent", version="0.1.0")
 REALM_CFG = load_realm()
 GH_CFG = load_gh_repos()
 
+_LAST_WEBHOOKS: list = []
 
 _poller_thread: Optional[threading.Thread] = None
 _poller_stop = threading.Event()
