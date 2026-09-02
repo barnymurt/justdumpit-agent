@@ -307,8 +307,17 @@ def email_poll_endpoint() -> dict:
 @app.post("/telegram/webhook")
 def telegram_webhook_endpoint(update: dict) -> dict:
     """Receive Telegram updates (messages + callback queries)."""
+    _LAST_WEBHOOKS.append(update)
+    while len(_LAST_WEBHOOKS) > 20:
+        _LAST_WEBHOOKS.pop(0)
     result = tg.handle_update(update)
     return {"ok": True, "handled": result}
+
+
+@app.get("/debug/recent-telegram")
+def debug_recent_telegram():
+    """Return the last 20 raw Telegram updates the agent received."""
+    return {"count": len(_LAST_WEBHOOKS), "updates": _LAST_WEBHOOKS}
 
 
 @app.post("/telegram/setup-webhook")
