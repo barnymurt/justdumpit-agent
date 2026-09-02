@@ -384,8 +384,13 @@ def _analyse_url(chat_id: int, url: str) -> None:
 
 
 def _freeform_chat(chat_id: int, text: str) -> None:
-    """Handle freeform chat. Uses simple keyword routing first, then a brief LLM response."""
+    """Handle freeform chat. URL detection first, then keyword routing, then LLM."""
     t = text.lower().strip()
+
+    url = _extract_youtube_url(text)
+    if url:
+        _analyse_url(chat_id, url)
+        return
 
     if any(k in t for k in ["what's awaiting", "whats awaiting", "what is awaiting", "what's pending", "queue"]):
         _chat_list(chat_id)
