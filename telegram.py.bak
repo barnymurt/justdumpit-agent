@@ -336,13 +336,13 @@ def _analyse_url(chat_id: int, url: str) -> None:
             json={"url": url, "prompt_version": "v2", "send_email": False},
             timeout=180.0,
         )
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except Exception as e:
+            log.warning("analyse_url %s failed: %s | response body: %s", url, e, r.text[:500] if hasattr(r, "text") else "<no body>")
+            _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code>\n<pre>{_html_escape((r.text[:500] if hasattr(r, 'text') else '<no body>'))}</pre>")
+            return
         data = r.json()
-    except Exception as e:
-        body_preview = (r.text[:800] if hasattr(r, "text") else "no body")
-        log.warning("analyse_url %s failed: %s | body: %s", url, e, body_preview)
-        _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code>\n<pre>{_html_escape(body_preview)}</pre>")
-        return
 
     title = data.get("video_title") or "(no title)"
     video_id = data.get("video_id") or ""
@@ -385,8 +385,13 @@ def _analyse_url(chat_id: int, url: str) -> None:
 
 
 def _freeform_chat(chat_id: int, text: str) -> None:
-    """Handle freeform chat. Uses simple keyword routing first, then a brief LLM response."""
+    """Handle freeform chat. URL detection first, then keyword routing, then LLM."""
     t = text.lower().strip()
+
+    url = _extract_youtube_url(text)
+    if url:
+        _analyse_url(chat_id, url)
+        return
 
     if any(k in t for k in ["what's awaiting", "whats awaiting", "what is awaiting", "what's pending", "queue"]):
         _chat_list(chat_id)
