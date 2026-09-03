@@ -340,7 +340,7 @@ def _analyse_url(chat_id: int, url: str) -> None:
             r.raise_for_status()
         except Exception as e:
             log.warning("analyse_url %s failed: %s | response body: %s", url, e, r.text[:500] if hasattr(r, "text") else "<no body>")
-            _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code><br><pre>{_html_escape((r.text[:500] if hasattr(r, 'text') else '<no body>'))}</pre>")
+            _send_safe(chat_id, f"Analysis failed: <code>{_html_escape(str(e))}</code>\n<pre>{_html_escape((r.text[:500] if hasattr(r, 'text') else '<no body>'))}</pre>")
             return
         data = r.json()
 
